@@ -11,19 +11,16 @@ from csv import reader
 import os.path
 from psycopg2.extensions import AsIs
 from git import Repo
+from datetime import datetime
+
 
 def download_files():
     
     if os.path.isdir('C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/Raw_CSVs') is False:
-        Repo.clone_from('https://github.com/silfeid/Western-PA-Climate-Database/tree/master/Climate_Data/Raw_CSVs', 'C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/Raw_CSVs')
+        Repo.clone_from('https://github.com/silfeid/Western_PA_Climate_Project_Raw_Data.git', 'C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/Raw_CSVs')
     
     else:
-        pass
-
-
-
-
-
+        print('\nRepository of raw climate data files in csv form already exists.')
 
 #connstring is saved to file, because we're going to need to change it once we create the db; we need to start off with a dbname that we know will exist (postgres).
 def close_all_connections_to_db():
@@ -93,7 +90,7 @@ language plpgsql;"""
 		print('Database created!')
 		
 	else:
-		print('Database found!')
+		print('\nDatabase found!')
 	cursor.execute(sql1)
 	row=cursor.fetchone();
 	cursor.close
@@ -115,7 +112,7 @@ def import_station_from_csv():
 	conn=psycopg2.connect(connstring)
 	cur=conn.cursor()
 
-	directory = 'C:/Users/brode/OneDrive/Desktop/Raw_CSVs/'
+	directory = 'C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/Raw_CSVs/'
 	for filename in os.listdir(directory):
 		if filename.endswith('.csv'):
 			with open(directory+filename, 'r') as read_obj:
@@ -144,14 +141,38 @@ def import_station_from_csv():
 	cur.close()
 	conn.close
 	
+def grab_db_table_list():
+	connection = open('C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/connstring.txt', 'r')
+	connstring = connection.readline()
+	conn=psycopg2.connect(connstring)
+	cur=conn.cursor()
+	sql = """SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'usc%' OR table_name LIKE 'usw%';"""
+	cur.execute(sql)
+	row=cur.fetchone();
+	table_list=[]
+	while row is not None:
+		row=str(row)
+		row=row.replace('(','')
+		row=row.replace(')','')
+		row=row.replace('\'','')
+		row=row.replace('\'','')
+		row=row.replace(',','')
+		table_list.append(row)
+		row=cur.fetchone()
+	return table_list
+	
 def import_observations_from_csv():
 	connection = open('C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/connstring.txt', 'r')
 	connstring = connection.readline()
 	conn=psycopg2.connect(connstring)
 	cur=conn.cursor()
 	
-	directory = 'C:/Users/brode/OneDrive/Desktop/Raw_CSVs/'
+	table_list = grab_db_table_list()
+	
+	directory = 'C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/Raw_CSVs/'
+	
 	file_list = os.listdir(directory)
+	
 	for filename in file_list:
 		if filename.endswith('.csv'):
 			with open(directory+filename, 'r') as read_obj:
@@ -159,14 +180,23 @@ def import_observations_from_csv():
 				header=next(csv_reader)
 				row = next(csv_reader)
 				station_code=row[0]
-				sql1="""SELECT * FROM stations WHERE station_code=%s"""
-				cur.execute(sql1, (station_code,))
-				row=cur.fetchone();
-				if row==None:
-					print("Station not listed in stations table; skipping.")
-					file_list.remove(filename)
-		else:
-			file_list.remove(filename)
+				if station_code in table_list:
+					pass
+				else:
+					sql1="""SELECT * FROM stations WHERE station_code=%s"""
+					cur.execute(sql1, (station_code,))
+					row=cur.fetchone();
+					if row==None:
+						print("Station not listed in stations table; skipping.")
+						file_list.remove(filename)
+
+						
+					
+					
+					
+					
+					
+			
 				
 	for filename in file_list:
 		with open(directory+filename, 'r') as read_obj:
@@ -184,6 +214,7 @@ def import_observations_from_csv():
 					temp_min numeric (5,2) NULL);""");
 			conn.commit()	
 	#Probably should change this so that the default is to just skip files for which there is already a table in the DB, leave a separate function so that the user can add new dates etc. if they want; this is memory-intensive and time-consuming (took computer five minutes to add everything, just to get one new date...)			
+	
 	for filename in file_list:			
 		with open(directory+filename, 'r') as read_obj:
 			csv_reader = reader(read_obj)
@@ -225,27 +256,39 @@ def select_date():
 	sql1="""SELECT * FROM stations"""
 	cur.execute(sql1)
 	row=cur.fetchone();
+	stations=[]
+	counter = 1
 	if row==None:
 		print("No records found.")
 	else:
 		print('\nAll Stations\n')
 		while row is not None:
-			print(row['station_code'] + " | " + row['station_name'] + " | " + str(row['latitude']) + " | " + str(row['longitude']) + " | " + str(row['elevation']))
+			print(str(counter)+' | '+row['station_code'] + " | " + row['station_name'] + " | " + str(row['latitude']) + " | " + str(row['longitude']) + " | " + str(row['elevation']))
+			stations.append(row['station_code'])
 			row=cur.fetchone()
+			counter += 1
 
+	solicit_station = integer_checker('Enter a station code from the table above:  ')
+	while solicit_station < 1 or solicit_station > counter:
+		solicit_station = integer_checker('Enter a station code from the table above:  ')
+	else:
+		station_number = solicit_station-1
 	
-	solicit_station = input('Enter a station code from the table above:  ')
-	solicit_date = input('Enter desired date in format MM/DD/YYY or YYYY-MM-DD:  ')
+	solicit_date = valiDate('Enter a date in the format MM/DD/YYYY:  ')
+	solicit_station = stations[station_number]
 	
 	sql2 = """SELECT * FROM %s WHERE ob_date = %s;"""
 	cur.execute(sql2, (AsIs(solicit_station), solicit_date))
 	row=cur.fetchone();
+	column_names = get_column_names(solicit_station)
 	if row==None:
 		print("No records found.")
 	else:
-		print('\nData from '+solicit_station+' on '+solicit_date)
+		print('\nData from '+solicit_station+' on '+solicit_date+'\n')
+		print(column_names[2]+'|'+column_names[3]+'|'+column_names[4]+'|'+column_names[5]+'|'+column_names[6])
 		while row is not None:
-			print(str(row['ob_date']) + " | " + str(row['snow_fall']) + " | " + str(row['snow_depth']) + " | " + str(row['temp_max']) + " | " + str(row['temp_min']))
+
+			print(str(row['ob_date']) + " | " + str(row['snow_fall']) + "    | " + str(row['snow_depth']) + "     | " + str(row['temp_max']) + "  | " + str(row['temp_min']))
 			row=cur.fetchone()
 			
 def select_dates():
@@ -257,44 +300,99 @@ def select_dates():
 	sql1="""SELECT * FROM stations"""
 	cur.execute(sql1)
 	row=cur.fetchone();
+	stations=[]
+	counter = 1
 	if row==None:
-		print("No records found")
+		print("No records found.")
 	else:
 		print('\nAll Stations\n')
 		while row is not None:
-			print(row['station_code'] + " | " + row['station_name'] + " | " + str(row['latitude']) + " | " + str(row['longitude']) + " | " + str(row['elevation']))
+			print(str(counter)+' | '+row['station_code'] + " | " + row['station_name'] + " | " + str(row['latitude']) + " | " + str(row['longitude']) + " | " + str(row['elevation']))
+			stations.append(row['station_code'])
 			row=cur.fetchone()
+			counter += 1
 
+	solicit_station = integer_checker('Enter a station code from the table above:  ')
+	while solicit_station < 1 or solicit_station > counter:
+		solicit_station = integer_checker('Enter a station code from the table above:  ')
+	else:
+		station_number = solicit_station-1
 	
-	solicit_station = input('Enter a station code from the table above:  ')
-	solicit_first_date = input('Enter desired start date in format MM/DD/YYY or YYYY-MM-DD:  ')
-	solicit_second_date = input('Enter desired end date in format MM/DD/YYY or YYYY-MM-DD:  ')	
+	solicit_first_date = valiDate('Enter a start date in the format MM/DD/YYYY:  ')
+	solicit_second_date = valiDate('Enter an end date in the format MM/DD/YYYY:  ')
+	solicit_station = stations[station_number]
 	
 	sql2 = """SELECT * FROM %s WHERE ob_date BETWEEN %s AND %s;"""
 	cur.execute(sql2, (AsIs(solicit_station), solicit_first_date, solicit_second_date))
 	row=cur.fetchone();
+	column_names = get_column_names(solicit_station)	
 	if row==None:
 		print("No records found.")
 	else:
 		print('\nData from '+solicit_station+' between ' + solicit_first_date + ' and ' + solicit_second_date + '\n')
+		print(column_names[2]+'|'+column_names[3]+'|'+column_names[4]+'|'+column_names[5]+'|'+column_names[6])
 		while row is not None:
 			print(str(row['ob_date']) + " | " + str(row['snow_fall']) + " | " + str(row['snow_depth']) + " | " + str(row['temp_max']) + " | " + str(row['temp_min']))
 			row=cur.fetchone()
 
+def get_column_names(table_name):
+	connection = open('C:/Users/brode/OneDrive/Desktop/T&L/Final_Project/connstring.txt', 'r')
+	connstring = connection.readline()
+	conn=psycopg2.connect(connstring)
+	cur=conn.cursor()
+	cur.execute("Select * FROM "+table_name+" LIMIT 0")
+	column_names = [desc[0] for desc in cur.description]
+	return column_names
 
-choice = input('1 to check if db exists\n2 to close all connections to db\n3 to import stations csv\n4 to import station observations\n5 to see observations for a given date from a given station\n6 to see observations for a range of dates from a given station:  ')	
-choices = ['1', '2', '3', '4', '5', '6', '7']
-if choice == '1':
-	db_name = check_db_exists()
-elif choice == '2':
-	close_all_connections_to_db()
-elif choice == '3':
-	import_station_from_csv()
-elif choice == '4':
-	import_observations_from_csv()
-elif choice == '5':
-	select_date()
-elif choice == '6':
-	select_dates()
-elif choice == '7':
-	download_files()
+def valiDate(date_string):
+	format = "%m/%d/%Y"
+	while True:
+		try:
+			test_str = input('Enter a date in the format MM/DD/YYYY: ')
+			result = bool(datetime.strptime(test_str, format))
+		except ValueError:
+			result = False
+		else:
+			return test_str
+
+def integer_checker(integer):
+  while True:
+    try:
+       user_input = int(input(integer))       
+    except ValueError:
+       print("\nInput must be an integer. Try again.")
+       continue
+    else:
+       return user_input 
+       break 
+
+def menu():
+	choice = input('1 to check if db exists\n2 to close all connections to db\n3 to import stations csv\n4 to import station observations\n5 to see observations for a given date from a given station\n6 to see observations for a range of dates from a given station\n7 to download remote repository of raw climate data files in csv form from Github\nQ/q to quit:  ')	
+
+	if choice == '1':
+		check_db_exists()
+		menu()
+	elif choice == '2':
+		close_all_connections_to_db()
+		menu()
+	elif choice == '3':
+		import_station_from_csv()
+		menu()
+	elif choice == '4':
+		import_observations_from_csv()
+		menu()
+	elif choice == '5':
+		select_date()
+		menu()
+	elif choice == '6':
+		select_dates()
+		menu()
+	elif choice == '7':
+		download_files()
+		menu()
+	elif choice == 'Q' or choice =='q':
+		pass
+	elif choice =='8':
+		grab_db_table_list()
+		
+menu()

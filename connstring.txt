@@ -1,0 +1,1 @@
+host=localhost dbname=western_pa_climate_db user=postgres password=boquet

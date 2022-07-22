@@ -236,75 +236,35 @@ def grab_db_table_list():
                 row=cur.fetchone()
         return table_list
 
-def get_station_names_list():
-    station_names_list = []
+def build_station_dict():
+    
+    station_dict = {}
     connstring = get_connstring()
     conn=psycopg2.connect(connstring)
     cur=conn.cursor()
-    sql = """SELECT station_name FROM stations;"""
+    sql = """SELECT station_code, station_name FROM stations;"""
     cur.execute(sql)
     row=cur.fetchone();
     while row is not None:        
-        name = str(row[0])
-        name=name.replace('(','')
-        name=name.replace(')','')
-        name=name.replace('\'','')
-        name = name.split(',')
-        name = name[0]
-        station_names_list.append(name)
+        code = str(row[0])
+        name = str(row[1])
+        name = station_name_fixer(name)
+        station_dict[code]=name        
         row=cur.fetchone()
-    return station_names_list
-
-def get_station_codes_list():
-    
-    
-    station_codes_list = []
-    connstring = get_connstring()
-    conn=psycopg2.connect(connstring)
-    cur=conn.cursor()
-    sql = """SELECT station_code FROM stations;"""
-    cur.execute(sql)
-    row=cur.fetchone();
-    while row is not None:  
-        name = str(row[0])
-        station_codes_list.append(name)
-        row=cur.fetchone()
-    
-    return station_codes_list
-
-def fix_station_names():
-    
-    station_names = get_station_names_list()
-    numbered_names = []
-    unnumbered_names = []
-    
-    for name in station_names:
-        if any(character.isdigit() for character in name):
-            numbered_names.append(name)
-        if not any(character.isdigit() for character in name):    
-            unnumbered_names.append(name)
-            
-    
-    for name in numbered_names:
-        for character in name:
-            if character.isdigit():
-                name=name.split(character)
-                unnumbered_names.append(name[0])
-       
-    unnumbered_names.sort()            
-       
-    return unnumbered_names
-
-def get_station_dict():
-    
-    station_dict = {}
-    
-    station_names_list = fix_station_names()
-    station_codes_list = get_station_codes_list()
-    station_dict = dict(zip(station_names_list, station_codes_list))
-    
     return station_dict
     
+def station_name_fixer(name):
+
+    for character in name:
+            if character.isdigit():
+                name=name.split(character)
+                name=name[0]
+            else:
+                pass
+            name=name.split(',')
+            name=name[0]
+            name=name.rstrip(' ')
+    return name
 
 #This function takes the relevant fields from the csv's and uses them to create observation tables; the ob tables drop most of the station data, only retaining the station code (so that any observation record can be linked to the stations table as needed).        
 def import_observations_from_csv():
@@ -457,11 +417,14 @@ def build_dfs():
     #The next bit of code uses the os module to create new directories at a specified location (within parent_dir), one for each station location identified above.        
     parent_dir = "Western_PA_Climate_Project/Plots/Single_Stations/"
     
-    station_names = get_station_dict()
+    
+    station_dict = build_station_dict()
+    station_names = station_dict.values()
+    
     for station_name in station_names:
         #the filepath for the new directory = the parentdir + the station name
         path = os.path.join(parent_dir, station_name)
-        #Check to make sure that directory doesn't already exit; if it does, we simply "pass" ;this way new stations can be added to the database/program without creating a headache.
+        #Check to make sure that directory doesn't already exist; if it does, we simply "pass" ;this way new stations can be added to the database/program without creating a headache.
         if os.path.isdir(path) is False:
             #os.mkdir creates a directory at the specified filepath
             os.mkdir(path)
@@ -650,7 +613,8 @@ def single_df_plotter():
     df_dict, start, end = slice_dfs()
     
     print('Pick a station for which to plot data:\n')
-    station_names = get_station_dict()
+    station_dict = build_station_dict()
+    station_names = station_dict.values()
     counter = 1
     for station in station_names:
         counter = str(counter)
@@ -737,7 +701,7 @@ def single_df_plotter():
 #This function graphs the mean for each weather variable for each station for the specified date range, and also averages the average for all stations, graphing that as well.
 def descriptive_stats_grapher():
     
-    station_dict = get_station_dict()
+    station_dict = build_station_dict()
     
     df_dict, start, end = slice_dfs()
     start = str(start)
@@ -820,20 +784,26 @@ def descriptive_stats_grapher():
             #And we'll add in the All Stations Average element to correspond to the average that we stuck into the values list above.    
             snow_fall_keys.append('All Stations Average')
             
-            station_names_list = list(station_dict.keys())
+            station_dict= build_station_dict()
+            station_list = list(station_dict.keys())
+            matches = []
             
-            non_matches = []
-            
-            for name in station_names_list:
-                if name not in snow_fall_keys:
-                    non_matches.append(name)
+            for code in station_list:
+                if code in snow_fall_keys:
+                    matches.append(code)
                     
-            non_matches.append('All Stations Average')        
+            ''''******************NEED TO AMEND SO THAT CHOICE 2-4 DON'T NEED SEPARATE CODE - WASTEFUL'''        
+            
+            used_station_names = []    
+            for key in matches:
+                used_station_names.append(station_dict[key])
+                    
+            used_station_names.append('All Stations Average')
             
             #The code above (starting at station_names_list) currenmtly works for displaying station names rather than codes, ought to be created as a function and brought into the rest of the plotter functions thusly instead of redundant copying etc.
             
             #And now we build our bar graph, listing x, then y, and picking a color.                  
-            plt.bar(non_matches, snow_fall_values, color = 'skyblue')
+            plt.bar(used_station_names, snow_fall_values, color = 'skyblue')
             #Just tweaking the xticks.
             plt.xticks(rotation =60, fontsize = 10, ha = 'right')
             #We'll give it a title...
@@ -973,7 +943,7 @@ def descriptive_stats_grapher():
 #This is the main attraction; we pick a variable and plot it across the specified date range for all stations.  Lots of data getting processed for this one.                
 def comparison_plotter():
      
-    station_dict = get_station_dict()
+    station_dict = build_station_dict()
     df_dict, start, end = slice_dfs()
     df_keys = df_dict.keys()
     
@@ -1285,10 +1255,6 @@ def menu():
             check_on_dfs()
             menu()
             
-        if menu_choice == '12':
-            get_station_dict()
-            menu()
-            
     elif menu_choice == 'Q' or menu_choice == 'q':
         func_quit()
         
@@ -1312,5 +1278,5 @@ def main():
     
     
 if __name__ == "__main__":
-    get_station_dict()
+    build_station_dict()
     main()
